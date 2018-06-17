@@ -301,7 +301,13 @@ static void ParseMPreferVectorWidth(const Driver &D, const ArgList &Args,
 }
 
 static void getWebAssemblyTargetFeatures(const ArgList &Args,
-                                         std::vector<StringRef> &Features) {
+                                         std::vector<StringRef> &Features,
+                                         ArgStringList &CmdArgs) {
+  if (Args.hasArg(clang::driver::options::OPT_wasm_host_triple)) {
+    std::string hostTriple = Args.getLastArgValue(clang::driver::options::OPT_wasm_host_triple);
+    CmdArgs.push_back("-aux-triple");
+    CmdArgs.push_back(Args.MakeArgString(hostTriple));
+  }
   handleTargetFeaturesGroup(Args, Features, options::OPT_m_wasm_Features_Group);
 }
 
@@ -352,7 +358,7 @@ static void getTargetFeatures(const ToolChain &TC, const llvm::Triple &Triple,
     break;
   case llvm::Triple::wasm32:
   case llvm::Triple::wasm64:
-    getWebAssemblyTargetFeatures(Args, Features);
+    getWebAssemblyTargetFeatures(Args, Features, CmdArgs);
     break;
   case llvm::Triple::sparc:
   case llvm::Triple::sparcel:

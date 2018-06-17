@@ -14,6 +14,8 @@
 #ifndef LLVM_CLANG_LIB_BASIC_TARGETS_WEBASSEMBLY_H
 #define LLVM_CLANG_LIB_BASIC_TARGETS_WEBASSEMBLY_H
 
+#include "Targets.h"
+#include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TargetOptions.h"
 #include "llvm/ADT/Triple.h"
@@ -119,11 +121,99 @@ private:
 };
 class LLVM_LIBRARY_VISIBILITY WebAssembly32TargetInfo
     : public WebAssemblyTargetInfo {
+  std::unique_ptr<TargetInfo> HostTarget;
 public:
   explicit WebAssembly32TargetInfo(const llvm::Triple &T,
                                    const TargetOptions &Opts)
       : WebAssemblyTargetInfo(T, Opts) {
+    if (Opts.HostTriple == "") {
+      HostTarget = nullptr;
+    } else {
+      llvm::Triple HostTriple(Opts.HostTriple);
+      HostTarget.reset(AllocateTarget(llvm::Triple(Opts.HostTriple), Opts));
+
+      // We want C/C++ to follow a different machine model from the 
+      // target(wasm32). This different machine model is used when C/C++ is
+      // lowered to llvm. However, the produced llvm is still lowered to WASM32
+      // with WASM32's machine model
+
+      // Properties from host target that we can safely copy
+      PointerWidth = HostTarget->getPointerWidth(/* AddrSpace = */ 0);
+      PointerAlign = HostTarget->getPointerAlign(/* AddrSpace = */ 0);
+      BoolWidth = HostTarget->getBoolWidth();
+      BoolAlign = HostTarget->getBoolAlign();
+      IntWidth = HostTarget->getIntWidth();
+      IntAlign = HostTarget->getIntAlign();
+      HalfWidth = HostTarget->getHalfWidth();
+      HalfAlign = HostTarget->getHalfAlign();
+      FloatWidth = HostTarget->getFloatWidth();
+      FloatAlign = HostTarget->getFloatAlign();
+      DoubleWidth = HostTarget->getDoubleWidth();
+      DoubleAlign = HostTarget->getDoubleAlign();
+      LongWidth = HostTarget->getLongWidth();
+      LongAlign = HostTarget->getLongAlign();
+      LongLongWidth = HostTarget->getLongLongWidth();
+      LongLongAlign = HostTarget->getLongLongAlign();
+      MinGlobalAlign = HostTarget->getMinGlobalAlign();
+      DefaultAlignForAttributeAligned = 
+        HostTarget->getDefaultAlignForAttributeAligned();
+      SizeType = HostTarget->getSizeType();
+      IntMaxType = HostTarget->getIntMaxType();
+      PtrDiffType = HostTarget->getPtrDiffType(/* AddrSpace = */ 0);
+      IntPtrType = HostTarget->getIntPtrType();
+      WCharType = HostTarget->getWCharType();
+      WIntType = HostTarget->getWIntType();
+      Char16Type = HostTarget->getChar16Type();
+      Char32Type = HostTarget->getChar32Type();
+      Int64Type = HostTarget->getInt64Type();
+      ProcessIDType = HostTarget->getProcessIDType();
+      LongDoubleWidth = HostTarget->getLongDoubleWidth();
+      LongDoubleAlign = HostTarget->getLongDoubleAlign();
+      UseBitFieldTypeAlignment = HostTarget->useBitFieldTypeAlignment();
+      UseZeroLengthBitfieldAlignment = 
+        HostTarget->useZeroLengthBitfieldAlignment();
+      UseExplicitBitFieldAlignment = 
+        HostTarget->useExplicitBitFieldAlignment();
+      ZeroLengthBitfieldBoundary = 
+        HostTarget->getZeroLengthBitfieldBoundary();
+      LargeArrayMinWidth = HostTarget->getLargeArrayMinWidth();
+      LargeArrayAlign = HostTarget->getLargeArrayAlign();
+
+      // We need to make sure wasm32 supports these properties before copying
+      // from the host
+      if (HostTarget->getMaxAtomicPromoteWidth() < MaxAtomicPromoteWidth) {
+        MaxAtomicPromoteWidth = HostTarget->getMaxAtomicPromoteWidth();
+      }
+
+      if (HostTarget->getMaxAtomicInlineWidth() <= MaxAtomicInlineWidth) {
+        MaxAtomicInlineWidth = HostTarget->getMaxAtomicInlineWidth();
+      }
+
+      if (HostTarget->getTypeWidth(HostTarget->getSigAtomicType()) <= 
+        getTypeWidth(SigAtomicType)) {
+        SigAtomicType = HostTarget->getSigAtomicType();
+      }
+
+      if (HostTarget->getNewAlign() > NewAlign) {
+        NewAlign = HostTarget->getNewAlign();
+      }
+
+      if (HostTarget->getSuitableAlign() > SuitableAlign) {
+        SuitableAlign = HostTarget->getSuitableAlign();
+      }
+      // Note we do not have to set the data layout differently, as llvm's
+      // target layout is still the same
+    }
     resetDataLayout("e-m:e-p:32:32-i64:64-n32:64-S128");
+  }
+
+  bool validateTarget(DiagnosticsEngine &Diags) const override {
+    if (HostTarget != nullptr && HostTarget->isBigEndian() != isBigEndian()) {
+      Diags.Report(diag::err_wasm_host_triple_unsupported_value) 
+        << HostTarget->getTriple().str() << "Endian";
+      return false;
+    }
+    return true;
   }
 
 protected:

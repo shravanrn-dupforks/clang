@@ -3092,6 +3092,13 @@ bool CompilerInvocation::CreateFromArgs(CompilerInvocation &Res,
   if (LangOpts.OpenMPIsDevice)
     Res.getTargetOpts().HostTriple = Res.getFrontendOpts().AuxTriple;
 
+  llvm::Triple T(Res.getTargetOpts().Triple);
+  auto Arch = T.getArch();
+  // Wasm for non embedded use cases allows customization based on the host it can run on
+  if (Arch == llvm::Triple::wasm32 || Arch == llvm::Triple::wasm64) {
+    Res.getTargetOpts().HostTriple = Res.getFrontendOpts().AuxTriple;
+  }
+
   // FIXME: Override value name discarding when asan or msan is used because the
   // backend passes depend on the name of the alloca in order to print out
   // names.
@@ -3107,8 +3114,6 @@ bool CompilerInvocation::CreateFromArgs(CompilerInvocation &Res,
                               Res.getFrontendOpts().ProgramAction);
 
   // Turn on -Wspir-compat for SPIR target.
-  llvm::Triple T(Res.getTargetOpts().Triple);
-  auto Arch = T.getArch();
   if (Arch == llvm::Triple::spir || Arch == llvm::Triple::spir64) {
     Res.getDiagnosticOpts().Warnings.push_back("spir-compat");
   }

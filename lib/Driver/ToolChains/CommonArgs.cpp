@@ -70,6 +70,9 @@ void tools::handleTargetFeaturesGroup(const ArgList &Args,
                                       OptSpecifier Group) {
   for (const Arg *A : Args.filtered(Group)) {
     StringRef Name = A->getOption().getName();
+    if (Name == "wasm-host-triple=") {
+      continue;
+    }
     A->claim();
 
     // Skip over "-m".

@@ -248,4 +248,8 @@ def err_openclcxx_not_supported : Error<
 // OpenMP
 def err_omp_more_one_clause : Error<
   "directive '#pragma omp %0' cannot contain more than one '%1' clause%select{| with '%3' name modifier| with 'source' dependence}2">;
+
+// Wasm
+def err_wasm_host_triple_unsupported_value : Error<
+  "Host target triple('%0') parameter '%1' is not supported in WASM">;
 }

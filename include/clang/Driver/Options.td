@@ -2074,6 +2074,8 @@ def msign_ext : Flag<["-"], "msign-ext">, Group<m_wasm_Features_Group>;
 def mno_sign_ext : Flag<["-"], "mno-sign-ext">, Group<m_wasm_Features_Group>;
 def mexception_handing : Flag<["-"], "mexception-handling">, Group<m_wasm_Features_Group>;
 def mno_exception_handing : Flag<["-"], "mno-exception-handling">, Group<m_wasm_Features_Group>;
+def wasm_host_triple : Joined<["--"], "wasm-host-triple=">, Group<m_wasm_Features_Group>,
+  HelpText<"Wasm Host triple - Use a C ABI as specified by this triple">;
 
 def mamdgpu_debugger_abi : Joined<["-"], "mamdgpu-debugger-abi=">,
   Flags<[HelpHidden]>,
