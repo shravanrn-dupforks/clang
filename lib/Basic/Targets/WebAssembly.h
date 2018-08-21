@@ -21,6 +21,11 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/Support/Compiler.h"
 
+#include <string>
+#include <fstream>
+#include <streambuf>
+#include <stdio.h>
+
 namespace clang {
 namespace targets {
 
@@ -124,7 +129,15 @@ public:
   explicit WebAssembly32TargetInfo(const llvm::Triple &T,
                                    const TargetOptions &Opts)
       : WebAssemblyTargetInfo(T, Opts) {
-    if (Opts.HostTriple == "") {
+
+    bool avoid = false;
+    std::ifstream tFile("/home/shr/Desktop/wasm_bitness.txt");
+    std::string str((std::istreambuf_iterator<char>(tFile)),
+                    std::istreambuf_iterator<char>());
+    if(str == "32" || str == "32\n") { avoid = true; }
+    else if(!(str == "64" || str == "64\n")) { printf("Bad bitness: %s", str.c_str()); exit(1); }
+
+    if (avoid || Opts.HostTriple == "") {
       HostTarget = nullptr;
     } else {
       llvm::Triple HostTriple(Opts.HostTriple);
@@ -136,7 +149,7 @@ public:
       // with WASM32's machine model
 
       // Properties from host target that we can safely copy
-      PointerWidth = HostTarget->getPointerWidth(/* AddrSpace = */ 0);
+      // PointerWidth = HostTarget->getPointerWidth(/* AddrSpace = */ 0);
       PointerAlign = HostTarget->getPointerAlign(/* AddrSpace = */ 0);
       BoolWidth = HostTarget->getBoolWidth();
       BoolAlign = HostTarget->getBoolAlign();

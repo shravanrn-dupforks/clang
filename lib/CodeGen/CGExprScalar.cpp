@@ -1691,8 +1691,14 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
     if (MustVisitNullValue(E))
       (void) Visit(E);
 
-    return CGF.CGM.getNullPointer(cast<llvm::PointerType>(ConvertType(DestTy)),
-                              DestTy);
+    {
+      auto ConvertedType = ConvertType(DestTy);
+      // if (ConvertedType->isIntegerTy()){
+      //   return llvm::Constant::getIntegerValue(ConvertedType, llvm::APInt(ConvertedType->getIntegerBitWidth(), 0));
+      // }
+      return CGF.CGM.getNullPointer(cast<llvm::PointerType>(ConvertedType),
+                                DestTy);
+    }
 
   case CK_NullToMemberPointer: {
     if (MustVisitNullValue(E))
@@ -1749,7 +1755,13 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
     // First, convert to the correct width so that we control the kind of
     // extension.
     auto DestLLVMTy = ConvertType(DestTy);
-    llvm::Type *MiddleTy = CGF.CGM.getDataLayout().getIntPtrType(DestLLVMTy);
+    llvm::Type *MiddleTy;
+    auto TempPointerType = llvm::ArrayType::get(llvm::Type::getInt64Ty(CGF.getLLVMContext()), 1);
+    if (DestLLVMTy == TempPointerType) {
+      MiddleTy = DestLLVMTy->getArrayElementType();
+    } else {
+      MiddleTy = CGF.CGM.getDataLayout().getIntPtrType(DestLLVMTy);
+    }
     bool InputSigned = E->getType()->isSignedIntegerOrEnumerationType();
     llvm::Value* IntResult =
       Builder.CreateIntCast(Src, MiddleTy, InputSigned, "conv");

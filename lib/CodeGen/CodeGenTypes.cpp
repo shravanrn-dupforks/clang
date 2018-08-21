@@ -545,6 +545,8 @@ llvm::Type *CodeGenTypes::ConvertType(QualType T) {
       PointeeType = llvm::Type::getInt8Ty(getLLVMContext());
     unsigned AS = Context.getTargetAddressSpace(ETy);
     ResultType = llvm::PointerType::get(PointeeType, AS);
+    // ResultType = llvm::Type::getInt64Ty(getLLVMContext());
+    ResultType = llvm::ArrayType::get(llvm::Type::getInt64Ty(getLLVMContext()), 1);
     break;
   }
 
@@ -569,6 +571,11 @@ llvm::Type *CodeGenTypes::ConvertType(QualType T) {
       ResultType = llvm::Type::getInt8Ty(getLLVMContext());
     }
     ResultType = llvm::ArrayType::get(ResultType, 0);
+    if (A->getElementType()->isPointerType()) {
+      // ResultType = llvm::ArrayType::get(llvm::Type::getInt64Ty(getLLVMContext()), 0);
+      auto TempPointerType = llvm::ArrayType::get(llvm::Type::getInt64Ty(getLLVMContext()), 1);
+      ResultType = llvm::ArrayType::get(TempPointerType, 0);
+    }
     break;
   }
   case Type::ConstantArray: {
@@ -583,6 +590,11 @@ llvm::Type *CodeGenTypes::ConvertType(QualType T) {
     }
 
     ResultType = llvm::ArrayType::get(EltTy, A->getSize().getZExtValue());
+    if (A->getElementType()->isPointerType()) {
+      // ResultType = llvm::ArrayType::get(llvm::Type::getInt64Ty(getLLVMContext()), A->getSize().getZExtValue());
+      auto TempPointerType = llvm::ArrayType::get(llvm::Type::getInt64Ty(getLLVMContext()), 1);
+      ResultType = llvm::ArrayType::get(TempPointerType, A->getSize().getZExtValue());
+    }
     break;
   }
   case Type::ExtVector:

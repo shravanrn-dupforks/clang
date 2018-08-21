@@ -676,7 +676,7 @@ protected:
   void Layout(const ObjCInterfaceDecl *D);
 
   void LayoutFields(const RecordDecl *D);
-  void LayoutField(const FieldDecl *D, bool InsertExtraPadding);
+  void LayoutField(const FieldDecl *D, bool InsertExtraPadding, bool PadPointers);
   void LayoutWideBitField(uint64_t FieldSize, uint64_t TypeSize,
                           bool FieldPacked, const FieldDecl *D);
   void LayoutBitField(const FieldDecl *D);
@@ -1347,7 +1347,7 @@ void ItaniumRecordLayoutBuilder::Layout(const ObjCInterfaceDecl *D) {
   // Layout each ivar sequentially.
   for (const ObjCIvarDecl *IVD = D->all_declared_ivar_begin(); IVD;
        IVD = IVD->getNextIvar())
-    LayoutField(IVD, false);
+    LayoutField(IVD, false, true);
 
   // Finally, round the size of the total struct up to the alignment of the
   // struct itself.
@@ -1363,7 +1363,7 @@ void ItaniumRecordLayoutBuilder::LayoutFields(const RecordDecl *D) {
     auto Next(I);
     ++Next;
     LayoutField(*I,
-                InsertExtraPadding && (Next != End || !HasFlexibleArrayMember));
+                InsertExtraPadding && (Next != End || !HasFlexibleArrayMember), true);
   }
 }
 
@@ -1712,7 +1712,7 @@ void ItaniumRecordLayoutBuilder::LayoutBitField(const FieldDecl *D) {
 }
 
 void ItaniumRecordLayoutBuilder::LayoutField(const FieldDecl *D,
-                                             bool InsertExtraPadding) {
+                                             bool InsertExtraPadding, bool PadPointers) {
   if (D->isBitField()) {
     LayoutBitField(D);
     return;
@@ -1851,6 +1851,15 @@ void ItaniumRecordLayoutBuilder::LayoutField(const FieldDecl *D,
     FieldSize += ExtraSizeForAsan;
   }
 
+  if (PadPointers) {
+    auto ft = D->getType();
+    if ((ft->isPointerType() && !ft->isArrayType()) ||
+      (ft->isArrayType() && ft->getBaseElementTypeUnsafe()->isPointerType())) {
+      std::pair<CharUnits, CharUnits> FieldInfo = 
+        Context.getTypeInfoInChars(ft);
+      FieldSize += FieldInfo.first;
+    }
+  }
   // Reserve space for this field.
   uint64_t FieldSizeInBits = Context.toBits(FieldSize);
   if (IsUnion)
