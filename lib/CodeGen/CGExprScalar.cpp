@@ -1693,9 +1693,12 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
 
     {
       auto ConvertedType = ConvertType(DestTy);
-      // if (ConvertedType->isIntegerTy()){
-      //   return llvm::Constant::getIntegerValue(ConvertedType, llvm::APInt(ConvertedType->getIntegerBitWidth(), 0));
-      // }
+      auto TempPointerType = llvm::VectorType::get(llvm::Type::getInt64Ty(CGF.getLLVMContext()), 1);
+      if (ConvertedType == TempPointerType){
+        auto width = TempPointerType->getScalarType()->getIntegerBitWidth();
+        auto zero = llvm::Constant::getIntegerValue(ConvertedType, llvm::APInt(width, 0));
+        return Builder.CreateBitCast(zero, ConvertedType);
+      }
       return CGF.CGM.getNullPointer(cast<llvm::PointerType>(ConvertedType),
                                 DestTy);
     }
@@ -1756,9 +1759,9 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
     // extension.
     auto DestLLVMTy = ConvertType(DestTy);
     llvm::Type *MiddleTy;
-    auto TempPointerType = llvm::ArrayType::get(llvm::Type::getInt64Ty(CGF.getLLVMContext()), 1);
+    auto TempPointerType = llvm::VectorType::get(llvm::Type::getInt64Ty(CGF.getLLVMContext()), 1);
     if (DestLLVMTy == TempPointerType) {
-      MiddleTy = DestLLVMTy->getArrayElementType();
+      MiddleTy = DestLLVMTy->getScalarType();
     } else {
       MiddleTy = CGF.CGM.getDataLayout().getIntPtrType(DestLLVMTy);
     }
@@ -1766,7 +1769,11 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
     llvm::Value* IntResult =
       Builder.CreateIntCast(Src, MiddleTy, InputSigned, "conv");
 
-    return Builder.CreateIntToPtr(IntResult, DestLLVMTy);
+    if (DestLLVMTy == TempPointerType) {
+      return Builder.CreateBitCast(IntResult, DestLLVMTy);
+    } else {
+      return Builder.CreateIntToPtr(IntResult, DestLLVMTy);
+    }
   }
   case CK_PointerToIntegral:
     assert(!DestTy->isBooleanType() && "bool should use PointerToBool");
@@ -3949,7 +3956,20 @@ Value *CodeGenFunction::EmitCheckedInBoundsGEP(Value *Ptr,
                                                bool IsSubtraction,
                                                SourceLocation Loc,
                                                const Twine &Name) {
-  Value *GEPVal = Builder.CreateInBoundsGEP(Ptr, IdxList, Name);
+  auto TempPointerType = llvm::VectorType::get(llvm::Type::getInt64Ty(getLLVMContext()), 1);
+
+  Value *GEPVal;
+  if(Ptr->getType() == TempPointerType)
+  {
+    auto intVal = Builder.CreateBitCast(Ptr, llvm::Type::getIntNTy(getLLVMContext(), Ptr->getType()->getScalarType()->getIntegerBitWidth()));
+    auto intTruncVal = Builder.CreateTrunc(intVal, llvm::Type::getIntNTy(getLLVMContext(), 32));
+    auto ptrVal = Builder.CreateIntToPtr(intTruncVal, llvm::Type::getVoidTy(getLLVMContext()));
+    GEPVal = Builder.CreateInBoundsGEP(ptrVal, IdxList, Name);
+  }
+  else
+  {
+    GEPVal = Builder.CreateInBoundsGEP(Ptr, IdxList, Name);
+  }
 
   // If the pointer overflow sanitizer isn't enabled, do nothing.
   if (!SanOpts.has(SanitizerKind::PointerOverflow))
