@@ -1618,7 +1618,24 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
                                       CE->getLocStart());
     }
 
-    return Builder.CreateBitCast(Src, DstTy);
+    if(!DstTy->isPointerTy()) {
+      auto zero = Builder.getInt32(0);
+      SmallVector<unsigned, 1> index { 0 };
+      SmallVector<Value*, 2> indexes { zero, zero };
+      auto align = CGF.CGM.getDataLayout().getABITypeAlignment(DstTy);
+
+      auto prevVal = Builder.CreateExtractValue(Src, index);
+      auto ptrVal = Builder.CreateBitCast(prevVal, cast<llvm::StructType>(DstTy)->getElementType(0));
+
+      auto allocaInst = Builder.CreateAlloca(DstTy);
+      auto newValPtr = Builder.CreateGEP(allocaInst, indexes);
+      Builder.CreateAlignedStore(ptrVal, newValPtr, align);
+
+      auto ret = Builder.CreateAlignedLoad(allocaInst, align);
+      return ret;
+    } else {
+      return Builder.CreateBitCast(Src, DstTy);
+    }
   }
   case CK_AddressSpaceConversion: {
     Expr::EvalResult Result;
@@ -1691,8 +1708,25 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
     if (MustVisitNullValue(E))
       (void) Visit(E);
 
-    return CGF.CGM.getNullPointer(cast<llvm::PointerType>(ConvertType(DestTy)),
+    if(!ConvertType(DestTy)->isPointerTy()) {
+      llvm::Type *DstTy = ConvertType(DestTy);
+      auto zero = Builder.getInt32(0);
+      SmallVector<Value*, 2> indexes { zero, zero };
+      auto align = CGF.CGM.getDataLayout().getABITypeAlignment(DstTy);
+
+      auto ptrVal = CGF.CGM.getNullPointer(cast<llvm::PointerType>(cast<llvm::StructType>(DstTy)->getElementType(0)),
                               DestTy);
+
+      auto allocaInst = Builder.CreateAlloca(DstTy);
+      auto newValPtr = Builder.CreateGEP(allocaInst, indexes);
+      Builder.CreateAlignedStore(ptrVal, newValPtr, align);
+
+      auto ret = Builder.CreateAlignedLoad(allocaInst, align);
+      return ret;
+    } else {
+      return CGF.CGM.getNullPointer(cast<llvm::PointerType>(ConvertType(DestTy)),
+                              DestTy);
+    }
 
   case CK_NullToMemberPointer: {
     if (MustVisitNullValue(E))
@@ -1749,12 +1783,31 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
     // First, convert to the correct width so that we control the kind of
     // extension.
     auto DestLLVMTy = ConvertType(DestTy);
-    llvm::Type *MiddleTy = CGF.CGM.getDataLayout().getIntPtrType(DestLLVMTy);
+    llvm::Type *MiddleTy;
+    if(!DestLLVMTy->isPointerTy()) {
+      MiddleTy = CGF.CGM.getDataLayout().getIntPtrType(cast<llvm::StructType>(DestLLVMTy)->getElementType(0));
+    } else {
+      MiddleTy = CGF.CGM.getDataLayout().getIntPtrType(DestLLVMTy);
+    }
     bool InputSigned = E->getType()->isSignedIntegerOrEnumerationType();
     llvm::Value* IntResult =
       Builder.CreateIntCast(Src, MiddleTy, InputSigned, "conv");
 
-    return Builder.CreateIntToPtr(IntResult, DestLLVMTy);
+    if(!DestLLVMTy->isPointerTy()) {
+      auto allocaInst = Builder.CreateAlloca(DestLLVMTy);
+      auto ptrVal = Builder.CreateIntToPtr(IntResult, cast<llvm::StructType>(DestLLVMTy)->getElementType(0));
+
+      auto align = CGF.CGM.getDataLayout().getABITypeAlignment(DestLLVMTy);
+      auto zero = Builder.getInt32(0);
+      SmallVector<Value*, 2> indexes { zero, zero };
+
+      auto gepInst = Builder.CreateGEP(allocaInst, indexes);
+      Builder.CreateAlignedStore(ptrVal, gepInst, align);
+      auto loadInst = Builder.CreateAlignedLoad(allocaInst, align);
+      return loadInst;
+    } else {
+      return Builder.CreateIntToPtr(IntResult, DestLLVMTy);
+    }
   }
   case CK_PointerToIntegral:
     assert(!DestTy->isBooleanType() && "bool should use PointerToBool");
@@ -3937,7 +3990,16 @@ Value *CodeGenFunction::EmitCheckedInBoundsGEP(Value *Ptr,
                                                bool IsSubtraction,
                                                SourceLocation Loc,
                                                const Twine &Name) {
-  Value *GEPVal = Builder.CreateInBoundsGEP(Ptr, IdxList, Name);
+  Value *GEPVal;
+  llvm::Type *DstTy = Ptr->getType();
+
+  if(!DstTy->isPointerTy()) {
+    SmallVector<unsigned, 1> index { 0 };
+    auto ptrVal = Builder.CreateExtractValue(Ptr, index);    
+    GEPVal = Builder.CreateInBoundsGEP(ptrVal, IdxList, Name);
+  } else {
+    GEPVal = Builder.CreateInBoundsGEP(Ptr, IdxList, Name);
+  }
 
   // If the pointer overflow sanitizer isn't enabled, do nothing.
   if (!SanOpts.has(SanitizerKind::PointerOverflow))

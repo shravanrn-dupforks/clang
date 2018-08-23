@@ -545,6 +545,7 @@ llvm::Type *CodeGenTypes::ConvertType(QualType T) {
       PointeeType = llvm::Type::getInt8Ty(getLLVMContext());
     unsigned AS = Context.getTargetAddressSpace(ETy);
     ResultType = llvm::PointerType::get(PointeeType, AS);
+    ResultType = llvm::StructType::get(ResultType, llvm::Type::getInt32Ty(getLLVMContext()));
     break;
   }
 
