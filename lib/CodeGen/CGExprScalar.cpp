@@ -126,6 +126,54 @@ struct BinOpInfo {
   }
 };
 
+
+static llvm::Value* RawPointerToWrappedPointer(CodeGenFunction &CGF,
+                                        llvm::Value* PointerVal) {
+  if(PointerVal->getType()->isPointerTy()) {
+    auto pointerType = llvm::StructType::get(PointerVal->getType(), llvm::Type::getInt32Ty(CGF.getLLVMContext()));
+    auto zero = CGF.Builder.getInt32(0);
+    SmallVector<Value*, 2> indexes { zero, zero };
+    auto align = CGF.CGM.getDataLayout().getABITypeAlignment(pointerType);
+
+    auto allocaInst = CGF.Builder.CreateAlloca(pointerType);
+    auto newValPtr = CGF.Builder.CreateGEP(allocaInst, indexes);
+    CGF.Builder.CreateAlignedStore(PointerVal, newValPtr, align);
+
+    auto ret = CGF.Builder.CreateAlignedLoad(allocaInst, align);
+    return ret;
+  } else {
+    return PointerVal;
+  }
+}
+
+static llvm::Value* WrappedPointerToRawPointer(CodeGenFunction &CGF,
+                                      llvm::Value* PointerVal){
+  if (!PointerVal->getType()->isPointerTy()) {
+    auto zero = CGF.Builder.getInt32(0);
+    SmallVector<Value*, 2> indexes { zero, zero };
+    return CGF.Builder.CreateGEP(PointerVal, indexes);
+  } else {
+    return PointerVal;
+  }
+}
+
+static llvm::Value* WrappedPointerRegToRawPointerReg(CodeGenFunction &CGF,
+                                      llvm::Value* PointerVal){
+  if (!PointerVal->getType()->isPointerTy()) {
+    return CGF.Builder.CreateExtractValue(PointerVal, 0);
+  } else {
+    return PointerVal;
+  }
+}
+
+static llvm::PointerType* GetWrappedPointerRawType(llvm::Type* PointerType) {
+  if (!PointerType->isPointerTy()) {
+    return cast<llvm::PointerType>(cast<llvm::StructType>(PointerType)->getElementType(0));
+  } else {
+    return cast<llvm::PointerType>(PointerType);
+  }
+}
+
 static bool MustVisitNullValue(const Expr *E) {
   // If a null pointer expression's type is the C++0x nullptr_t, then
   // it's not necessarily a simple constant and it must be evaluated
@@ -1602,8 +1650,15 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
   case CK_AnyPointerToBlockPointerCast:
   case CK_BitCast: {
     Value *Src = Visit(const_cast<Expr*>(E));
-    llvm::Type *SrcTy = Src->getType();
-    llvm::Type *DstTy = ConvertType(DestTy);
+    llvm::Type *SrcTy;
+    llvm::Type *DstTy;
+    if (E->getType()->isPointerType()) {
+      SrcTy = GetWrappedPointerRawType(Src->getType());
+      DstTy = GetWrappedPointerRawType(ConvertType(DestTy));
+    } else {
+      SrcTy = Src->getType();
+      DstTy = ConvertType(DestTy);
+    }
     if (SrcTy->isPtrOrPtrVectorTy() && DstTy->isPtrOrPtrVectorTy() &&
         SrcTy->getPointerAddressSpace() != DstTy->getPointerAddressSpace()) {
       llvm_unreachable("wrong cast for pointers in different address spaces"
@@ -1617,22 +1672,9 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
                                       CodeGenFunction::CFITCK_UnrelatedCast,
                                       CE->getLocStart());
     }
-
-    if(!DstTy->isPointerTy()) {
-      auto zero = Builder.getInt32(0);
-      SmallVector<unsigned, 1> index { 0 };
-      SmallVector<Value*, 2> indexes { zero, zero };
-      auto align = CGF.CGM.getDataLayout().getABITypeAlignment(DstTy);
-
-      auto prevVal = Builder.CreateExtractValue(Src, index);
-      auto ptrVal = Builder.CreateBitCast(prevVal, cast<llvm::StructType>(DstTy)->getElementType(0));
-
-      auto allocaInst = Builder.CreateAlloca(DstTy);
-      auto newValPtr = Builder.CreateGEP(allocaInst, indexes);
-      Builder.CreateAlignedStore(ptrVal, newValPtr, align);
-
-      auto ret = Builder.CreateAlignedLoad(allocaInst, align);
-      return ret;
+    if (E->getType()->isPointerType()) {
+      auto ret = Builder.CreateBitCast(WrappedPointerRegToRawPointerReg(CGF, Src), GetWrappedPointerRawType(ConvertType(DestTy)));
+      return RawPointerToWrappedPointer(CGF, ret);
     } else {
       return Builder.CreateBitCast(Src, DstTy);
     }
@@ -1708,25 +1750,8 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
     if (MustVisitNullValue(E))
       (void) Visit(E);
 
-    if(!ConvertType(DestTy)->isPointerTy()) {
-      llvm::Type *DstTy = ConvertType(DestTy);
-      auto zero = Builder.getInt32(0);
-      SmallVector<Value*, 2> indexes { zero, zero };
-      auto align = CGF.CGM.getDataLayout().getABITypeAlignment(DstTy);
-
-      auto ptrVal = CGF.CGM.getNullPointer(cast<llvm::PointerType>(cast<llvm::StructType>(DstTy)->getElementType(0)),
-                              DestTy);
-
-      auto allocaInst = Builder.CreateAlloca(DstTy);
-      auto newValPtr = Builder.CreateGEP(allocaInst, indexes);
-      Builder.CreateAlignedStore(ptrVal, newValPtr, align);
-
-      auto ret = Builder.CreateAlignedLoad(allocaInst, align);
-      return ret;
-    } else {
-      return CGF.CGM.getNullPointer(cast<llvm::PointerType>(ConvertType(DestTy)),
-                              DestTy);
-    }
+    return RawPointerToWrappedPointer(CGF, CGF.CGM.getNullPointer(GetWrappedPointerRawType(ConvertType(DestTy)),
+                                DestTy));
 
   case CK_NullToMemberPointer: {
     if (MustVisitNullValue(E))
@@ -1783,31 +1808,13 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
     // First, convert to the correct width so that we control the kind of
     // extension.
     auto DestLLVMTy = ConvertType(DestTy);
-    llvm::Type *MiddleTy;
-    if(!DestLLVMTy->isPointerTy()) {
-      MiddleTy = CGF.CGM.getDataLayout().getIntPtrType(cast<llvm::StructType>(DestLLVMTy)->getElementType(0));
-    } else {
-      MiddleTy = CGF.CGM.getDataLayout().getIntPtrType(DestLLVMTy);
-    }
+    auto MiddleTy = CGF.CGM.getDataLayout().getIntPtrType(GetWrappedPointerRawType(DestLLVMTy));
     bool InputSigned = E->getType()->isSignedIntegerOrEnumerationType();
     llvm::Value* IntResult =
       Builder.CreateIntCast(Src, MiddleTy, InputSigned, "conv");
 
-    if(!DestLLVMTy->isPointerTy()) {
-      auto allocaInst = Builder.CreateAlloca(DestLLVMTy);
-      auto ptrVal = Builder.CreateIntToPtr(IntResult, cast<llvm::StructType>(DestLLVMTy)->getElementType(0));
-
-      auto align = CGF.CGM.getDataLayout().getABITypeAlignment(DestLLVMTy);
-      auto zero = Builder.getInt32(0);
-      SmallVector<Value*, 2> indexes { zero, zero };
-
-      auto gepInst = Builder.CreateGEP(allocaInst, indexes);
-      Builder.CreateAlignedStore(ptrVal, gepInst, align);
-      auto loadInst = Builder.CreateAlignedLoad(allocaInst, align);
-      return loadInst;
-    } else {
-      return Builder.CreateIntToPtr(IntResult, DestLLVMTy);
-    }
+    auto ret = Builder.CreateIntToPtr(IntResult, GetWrappedPointerRawType(DestLLVMTy));
+    return RawPointerToWrappedPointer(CGF, ret);
   }
   case CK_PointerToIntegral:
     assert(!DestTy->isBooleanType() && "bool should use PointerToBool");
@@ -2749,7 +2756,7 @@ static Value *emitPointerArithmetic(CodeGenFunction &CGF,
   Expr *indexOperand = expr->getRHS();
 
   // In a subtraction, the LHS is always the pointer.
-  if (!isSubtraction && !pointer->getType()->isPointerTy()) {
+  if (!isSubtraction && !pointerOperand->getType()->isPointerType()) {
     std::swap(pointer, index);
     std::swap(pointerOperand, indexOperand);
   }
@@ -2758,7 +2765,7 @@ static Value *emitPointerArithmetic(CodeGenFunction &CGF,
 
   unsigned width = cast<llvm::IntegerType>(index->getType())->getBitWidth();
   auto &DL = CGF.CGM.getDataLayout();
-  auto PtrTy = cast<llvm::PointerType>(pointer->getType());
+  auto PtrTy = GetWrappedPointerRawType(pointer->getType());
 
   // Some versions of glibc and gcc use idioms (particularly in their malloc
   // routines) that add a pointer-sized integer (known to be a pointer value)
@@ -2780,8 +2787,10 @@ static Value *emitPointerArithmetic(CodeGenFunction &CGF,
   if (BinaryOperator::isNullPointerArithmeticExtension(CGF.getContext(),
                                                        op.Opcode,
                                                        expr->getLHS(), 
-                                                       expr->getRHS()))
-    return CGF.Builder.CreateIntToPtr(index, pointer->getType());
+                                                       expr->getRHS())) {
+    auto ptrVal = CGF.Builder.CreateIntToPtr(index, GetWrappedPointerRawType(pointer->getType()));
+    return RawPointerToWrappedPointer(CGF, ptrVal);
+  }
 
   if (width != DL.getTypeSizeInBits(PtrTy)) {
     // Zero-extend or sign-extend the pointer value according to
@@ -2809,9 +2818,11 @@ static Value *emitPointerArithmetic(CodeGenFunction &CGF,
 
     index = CGF.Builder.CreateMul(index, objectSize);
 
-    Value *result = CGF.Builder.CreateBitCast(pointer, CGF.VoidPtrTy);
+    Value* pointerRawVal = WrappedPointerToRawPointer(CGF, pointer);
+    Value *result = CGF.Builder.CreateBitCast(pointerRawVal, CGF.VoidPtrTy);
     result = CGF.Builder.CreateGEP(result, index, "add.ptr");
-    return CGF.Builder.CreateBitCast(result, pointer->getType());
+    result = CGF.Builder.CreateBitCast(result, PtrTy); 
+    return RawPointerToWrappedPointer(CGF, result);
   }
 
   QualType elementType = pointerType->getPointeeType();
@@ -2820,20 +2831,21 @@ static Value *emitPointerArithmetic(CodeGenFunction &CGF,
     // The element count here is the total number of non-VLA elements.
     llvm::Value *numElements = CGF.getVLASize(vla).NumElts;
 
+    Value* pointerRawVal = WrappedPointerToRawPointer(CGF, pointer);
     // Effectively, the multiply by the VLA size is part of the GEP.
     // GEP indexes are signed, and scaling an index isn't permitted to
     // signed-overflow, so we use the same semantics for our explicit
     // multiply.  We suppress this if overflow is not undefined behavior.
     if (CGF.getLangOpts().isSignedOverflowDefined()) {
       index = CGF.Builder.CreateMul(index, numElements, "vla.index");
-      pointer = CGF.Builder.CreateGEP(pointer, index, "add.ptr");
+      pointerRawVal = CGF.Builder.CreateGEP(pointerRawVal, index, "add.ptr");
     } else {
       index = CGF.Builder.CreateNSWMul(index, numElements, "vla.index");
-      pointer =
-          CGF.EmitCheckedInBoundsGEP(pointer, index, isSigned, isSubtraction,
+      pointerRawVal =
+          CGF.EmitCheckedInBoundsGEP(pointerRawVal, index, isSigned, isSubtraction,
                                      op.E->getExprLoc(), "add.ptr");
     }
-    return pointer;
+    return RawPointerToWrappedPointer(CGF, pointerRawVal);
   }
 
   // Explicitly handle GNU void* and function pointer arithmetic extensions. The
@@ -2920,8 +2932,8 @@ static Value* tryEmitFMulAdd(const BinOpInfo &op,
 }
 
 Value *ScalarExprEmitter::EmitAdd(const BinOpInfo &op) {
-  if (op.LHS->getType()->isPointerTy() ||
-      op.RHS->getType()->isPointerTy())
+  if (cast<BinaryOperator>(op.E)->getLHS()->getType()->isPointerType() ||
+      cast<BinaryOperator>(op.E)->getRHS()->getType()->isPointerType())
     return emitPointerArithmetic(CGF, op, CodeGenFunction::NotSubtraction);
 
   if (op.Ty->isSignedIntegerOrEnumerationType()) {
