@@ -1650,6 +1650,28 @@ llvm::Value *CodeGenFunction::EmitFromMemory(llvm::Value *Value, QualType Ty) {
   return Value;
 }
 
+static llvm::Value* OneLevelWrappedPointerToRawPointer(CodeGenFunction &CGF,
+                                      llvm::Value* OneLevelPointerVal){
+  if (OneLevelPointerVal->getType()->isPointerTy() &&
+    !(cast<llvm::PointerType>(OneLevelPointerVal->getType())->getElementType()->isPointerTy())
+  ) {
+    auto zero = CGF.Builder.getInt32(0);
+    SmallVector<llvm::Value*, 2> indexes { zero, zero };
+    return CGF.Builder.CreateGEP(OneLevelPointerVal, indexes);
+  } else {
+    return OneLevelPointerVal;
+  }
+}
+
+static llvm::Value* WrappedPointerRegToRawPointerReg(CodeGenFunction &CGF,
+                                      llvm::Value* PointerVal){
+  if (!PointerVal->getType()->isPointerTy()) {
+    return CGF.Builder.CreateExtractValue(PointerVal, 0);
+  } else {
+    return PointerVal;
+  }
+}
+
 void CodeGenFunction::EmitStoreOfScalar(llvm::Value *Value, Address Addr,
                                         bool Volatile, QualType Ty,
                                         LValueBaseInfo BaseInfo,
@@ -1687,7 +1709,43 @@ void CodeGenFunction::EmitStoreOfScalar(llvm::Value *Value, Address Addr,
     return;
   }
 
-  llvm::StoreInst *Store = Builder.CreateStore(Value, Addr, Volatile);
+  llvm::StoreInst *Store;
+  if (Ty->isPointerType()) {
+    auto addrPtr = Addr.getPointer();
+
+    if (addrPtr->getType()->isPointerTy()) {
+      auto pointeeType = cast<llvm::PointerType>(addrPtr->getType())->getElementType();
+      if(pointeeType == Value->getType()) {
+        //normal store
+        Store = Builder.CreateStore(Value, Addr, Volatile);
+      } else if (pointeeType->isStructTy()) {
+        auto structElementType = cast<llvm::StructType>(pointeeType)->getElementType(0);
+        if (structElementType == Value->getType()) {
+          //gep store
+          auto addrVal = OneLevelWrappedPointerToRawPointer(*this, Addr.getPointer());
+          Store = Builder.CreateAlignedStore(Value, addrVal, Addr.getAlignment(), Volatile);
+        } else {
+          assert(false);
+        }
+      } else {
+        assert(false);
+      }
+    } else if (addrPtr->getType()->isStructTy()) {
+      auto structElementType = cast<llvm::StructType>(addrPtr->getType())->getElementType(0);
+      auto pointeeType = cast<llvm::PointerType>(structElementType)->getElementType();
+
+      if (pointeeType == Value->getType()) {
+        auto addrVal = WrappedPointerRegToRawPointerReg(*this, Addr.getPointer());
+        Store = Builder.CreateAlignedStore(Value, addrVal, Addr.getAlignment(), Volatile);
+      } else {
+        assert(false);
+      }
+    } else {
+      assert(false);
+    }
+  } else {
+    Store = Builder.CreateStore(Value, Addr, Volatile);
+  }
   if (isNontemporal) {
     llvm::MDNode *Node =
         llvm::MDNode::get(Store->getContext(),
