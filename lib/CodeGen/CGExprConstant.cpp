@@ -1649,6 +1649,11 @@ llvm::Constant *ConstantLValueEmitter::tryEmit() {
   // non-zero null pointer and addrspace casts that aren't trivially
   // represented in LLVM IR.
   auto destTy = CGM.getTypes().ConvertTypeForMem(DestType);
+  if (DestType->isPointerType()) {
+    if (!isa<llvm::PointerType>(destTy)) {
+      destTy = cast<llvm::StructType>(destTy)->getElementType(0);
+    }
+  }
   assert(isa<llvm::IntegerType>(destTy) || isa<llvm::PointerType>(destTy));
 
   // If there's no base at all, this is a null or absolute pointer,
@@ -1671,8 +1676,9 @@ llvm::Constant *ConstantLValueEmitter::tryEmit() {
 
   // Convert to the appropriate type; this could be an lvalue for
   // an integer.  FIXME: performAddrSpaceCast
-  if (isa<llvm::PointerType>(destTy))
+  if (isa<llvm::PointerType>(destTy)) {
     return llvm::ConstantExpr::getPointerCast(value, destTy);
+  }
 
   return llvm::ConstantExpr::getPtrToInt(value, destTy);
 }

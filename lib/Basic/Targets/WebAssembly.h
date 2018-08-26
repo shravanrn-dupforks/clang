@@ -149,7 +149,7 @@ public:
       // with WASM32's machine model
 
       // Properties from host target that we can safely copy
-      // PointerWidth = HostTarget->getPointerWidth(/* AddrSpace = */ 0);
+      PointerWidth = HostTarget->getPointerWidth(/* AddrSpace = */ 0);
       PointerAlign = HostTarget->getPointerAlign(/* AddrSpace = */ 0);
       BoolWidth = HostTarget->getBoolWidth();
       BoolAlign = HostTarget->getBoolAlign();
