@@ -1818,7 +1818,7 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
   }
   case CK_PointerToIntegral:
     assert(!DestTy->isBooleanType() && "bool should use PointerToBool");
-    return Builder.CreatePtrToInt(Visit(E), ConvertType(DestTy));
+    return Builder.CreatePtrToInt(WrappedPointerRegToRawPointerReg(CGF, Visit(E)), ConvertType(DestTy));
 
   case CK_ToVoid: {
     CGF.EmitIgnoredExpr(E);
@@ -3215,12 +3215,23 @@ Value *ScalarExprEmitter::EmitCompare(const BinaryOperator *E,
            E->getOpcode() == BO_NE);
     Value *LHS = CGF.EmitScalarExpr(E->getLHS());
     Value *RHS = CGF.EmitScalarExpr(E->getRHS());
+    if(LHSTy->isPointerType()){
+      LHS = WrappedPointerRegToRawPointerReg(CGF, LHS);
+    }
+    if(RHSTy->isPointerType()){
+      RHS = WrappedPointerRegToRawPointerReg(CGF, RHS);
+    }
     Result = CGF.CGM.getCXXABI().EmitMemberPointerComparison(
                    CGF, LHS, RHS, MPT, E->getOpcode() == BO_NE);
   } else if (!LHSTy->isAnyComplexType() && !RHSTy->isAnyComplexType()) {
     Value *LHS = Visit(E->getLHS());
     Value *RHS = Visit(E->getRHS());
-
+    if(LHSTy->isPointerType()){
+      LHS = WrappedPointerRegToRawPointerReg(CGF, LHS);
+    }
+    if(RHSTy->isPointerType()){
+      RHS = WrappedPointerRegToRawPointerReg(CGF, RHS);
+    }
     // If AltiVec, the comparison results in a numeric type, so we use
     // intrinsics comparing vectors and giving 0 or 1 as a result
     if (LHSTy->isVectorType() && !E->getType()->isVectorType()) {

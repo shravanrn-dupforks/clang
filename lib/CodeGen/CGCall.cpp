@@ -3770,6 +3770,15 @@ void CodeGenFunction::deferPlaceholderReplacement(llvm::Instruction *Old,
   DeferredReplacements.push_back(std::make_pair(Old, New));
 }
 
+static llvm::Value* WrappedPointerRegToRawPointerReg(CodeGenFunction &CGF,
+                                      llvm::Value* PointerVal){
+  if (!PointerVal->getType()->isPointerTy()) {
+    return CGF.Builder.CreateExtractValue(PointerVal, 0);
+  } else {
+    return PointerVal;
+  }
+}
+
 RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
                                  const CGCallee &Callee,
                                  ReturnValueSlot ReturnValue,
@@ -4129,6 +4138,9 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
 
   const CGCallee &ConcreteCallee = Callee.prepareConcreteCallee(*this);
   llvm::Value *CalleePtr = ConcreteCallee.getFunctionPointer();
+  if(!CalleePtr->getType()->isPointerTy()){
+    CalleePtr = WrappedPointerRegToRawPointerReg(*this, CalleePtr);
+  }
 
   // If we're using inalloca, set up that argument.
   if (ArgMemory.isValid()) {
@@ -4173,8 +4185,14 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
   // This makes the IR nicer, but more importantly it ensures that we
   // can inline the function at -O0 if it is marked always_inline.
   auto simplifyVariadicCallee = [](llvm::Value *Ptr) -> llvm::Value* {
-    llvm::FunctionType *CalleeFT =
-      cast<llvm::FunctionType>(Ptr->getType()->getPointerElementType());
+    llvm::FunctionType *CalleeFT;
+    if (!Ptr->getType()->isPointerTy()){
+      CalleeFT =
+        cast<llvm::FunctionType>(cast<llvm::StructType>(Ptr->getType())->getElementType(0)->getPointerElementType());
+    } else {
+      CalleeFT =
+        cast<llvm::FunctionType>(Ptr->getType()->getPointerElementType());
+    }
     if (!CalleeFT->isVarArg())
       return Ptr;
 

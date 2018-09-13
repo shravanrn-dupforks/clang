@@ -113,8 +113,12 @@ public:
         : KindOrFunctionPointer(SpecialKind(uintptr_t(functionPtr))) {
       AbstractInfo = abstractInfo;
       assert(functionPtr && "configuring callee without function pointer");
-      assert(functionPtr->getType()->isPointerTy());
-      assert(functionPtr->getType()->getPointerElementType()->isFunctionTy());
+      assert(functionPtr->getType()->isPointerTy() || functionPtr->getType()->isStructTy());
+      if (functionPtr->getType()->isPointerTy()) {
+        assert(functionPtr->getType()->getPointerElementType()->isFunctionTy());
+      } else if (functionPtr->getType()->isStructTy()) {
+        assert(cast<llvm::StructType>(functionPtr->getType())->getElementType(0)->getPointerElementType()->isFunctionTy());
+      }
     }
 
     static CGCallee forBuiltin(unsigned builtinID,
@@ -203,6 +207,13 @@ public:
     llvm::FunctionType *getFunctionType() const {
       if (isVirtual())
         return VirtualInfo.FTy;
+
+      auto functionPtrType = getFunctionPointer()->getType();
+      if (functionPtrType->isStructTy()) {
+        return cast<llvm::FunctionType>(
+          cast<llvm::StructType>(functionPtrType)->getElementType(0)->getPointerElementType()
+        );
+      }
       return cast<llvm::FunctionType>(
           getFunctionPointer()->getType()->getPointerElementType());
     }
