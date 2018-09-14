@@ -1741,8 +1741,11 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
     return CGF.EmitDynamicCast(V, DCE);
   }
 
-  case CK_ArrayToPointerDecay:
-    return CGF.EmitArrayToPointerDecay(E).getPointer();
+  case CK_ArrayToPointerDecay: {
+    auto ret = CGF.EmitArrayToPointerDecay(E).getPointer();
+    return RawPointerToWrappedPointer(CGF, ret);
+  }
+
   case CK_FunctionToPointerDecay:
     return EmitLValue(E).getPointer();
 
@@ -2755,6 +2758,14 @@ static Value *emitPointerArithmetic(CodeGenFunction &CGF,
   Value *index = op.RHS;
   Expr *indexOperand = expr->getRHS();
 
+  if (pointerOperand->getType()->isPointerType()){
+    pointer = WrappedPointerRegToRawPointerReg(CGF, pointer);
+  }
+
+  if (indexOperand->getType()->isPointerType()){
+    index = WrappedPointerRegToRawPointerReg(CGF, index);
+  }
+
   // In a subtraction, the LHS is always the pointer.
   if (!isSubtraction && !pointerOperand->getType()->isPointerType()) {
     std::swap(pointer, index);
@@ -2854,14 +2865,18 @@ static Value *emitPointerArithmetic(CodeGenFunction &CGF,
   if (elementType->isVoidType() || elementType->isFunctionType()) {
     Value *result = CGF.Builder.CreateBitCast(pointer, CGF.VoidPtrTy);
     result = CGF.Builder.CreateGEP(result, index, "add.ptr");
-    return CGF.Builder.CreateBitCast(result, pointer->getType());
+    auto ret = CGF.Builder.CreateBitCast(result, pointer->getType());
+    return RawPointerToWrappedPointer(CGF, ret);
   }
 
-  if (CGF.getLangOpts().isSignedOverflowDefined())
-    return CGF.Builder.CreateGEP(pointer, index, "add.ptr");
+  if (CGF.getLangOpts().isSignedOverflowDefined()) {
+    auto ret = CGF.Builder.CreateGEP(pointer, index, "add.ptr");
+    return RawPointerToWrappedPointer(CGF, ret);
+  }
 
-  return CGF.EmitCheckedInBoundsGEP(pointer, index, isSigned, isSubtraction,
+  auto ret = CGF.EmitCheckedInBoundsGEP(pointer, index, isSigned, isSubtraction,
                                     op.E->getExprLoc(), "add.ptr");
+  return RawPointerToWrappedPointer(CGF, ret);
 }
 
 // Construct an fmuladd intrinsic to represent a fused mul-add of MulOp and
@@ -2970,7 +2985,16 @@ Value *ScalarExprEmitter::EmitAdd(const BinOpInfo &op) {
 
 Value *ScalarExprEmitter::EmitSub(const BinOpInfo &op) {
   // The LHS is always a pointer if either side is.
-  if (!op.LHS->getType()->isPointerTy()) {
+  bool lhsIsPtrType;
+  assert((isa<UnaryOperator>(op.E) || isa<BinaryOperator>(op.E)) 
+    && "Expected UnaryOperator or BinaryOperator for Subtraction.");
+  if (const UnaryOperator *uExpr = dyn_cast<UnaryOperator>(op.E)){
+    lhsIsPtrType = uExpr->getType()->isPointerType();
+  } else if(const BinaryOperator *bExpr = dyn_cast<BinaryOperator>(op.E)) {
+    lhsIsPtrType = bExpr->getLHS()->getType()->isPointerType();
+  }
+
+  if (!lhsIsPtrType) {
     if (op.Ty->isSignedIntegerOrEnumerationType()) {
       switch (CGF.getLangOpts().getSignedOverflowBehavior()) {
       case LangOptions::SOB_Defined:
@@ -3002,22 +3026,24 @@ Value *ScalarExprEmitter::EmitSub(const BinOpInfo &op) {
     return Builder.CreateSub(op.LHS, op.RHS, "sub");
   }
 
+  const BinaryOperator *expr = cast<BinaryOperator>(op.E);
+  Expr *rhsOperand = expr->getRHS();
+
   // If the RHS is not a pointer, then we have normal pointer
   // arithmetic.
-  if (!op.RHS->getType()->isPointerTy())
+  if (!rhsOperand->getType()->isPointerType())
     return emitPointerArithmetic(CGF, op, CodeGenFunction::IsSubtraction);
 
   // Otherwise, this is a pointer subtraction.
 
   // Do the raw subtraction part.
   llvm::Value *LHS
-    = Builder.CreatePtrToInt(op.LHS, CGF.PtrDiffTy, "sub.ptr.lhs.cast");
+    = Builder.CreatePtrToInt(WrappedPointerRegToRawPointerReg(CGF, op.LHS), CGF.PtrDiffTy, "sub.ptr.lhs.cast");
   llvm::Value *RHS
-    = Builder.CreatePtrToInt(op.RHS, CGF.PtrDiffTy, "sub.ptr.rhs.cast");
+    = Builder.CreatePtrToInt(WrappedPointerRegToRawPointerReg(CGF, op.RHS), CGF.PtrDiffTy, "sub.ptr.rhs.cast");
   Value *diffInChars = Builder.CreateSub(LHS, RHS, "sub.ptr.sub");
 
   // Okay, figure out the element size.
-  const BinaryOperator *expr = cast<BinaryOperator>(op.E);
   QualType elementType = expr->getLHS()->getType()->getPointeeType();
 
   llvm::Value *divisor = nullptr;
@@ -3056,7 +3082,8 @@ Value *ScalarExprEmitter::EmitSub(const BinOpInfo &op) {
   // Otherwise, do a full sdiv. This uses the "exact" form of sdiv, since
   // pointer difference in C is only defined in the case where both operands
   // are pointing to elements of an array.
-  return Builder.CreateExactSDiv(diffInChars, divisor, "sub.ptr.div");
+  auto ret = Builder.CreateExactSDiv(diffInChars, divisor, "sub.ptr.div");
+  return RawPointerToWrappedPointer(CGF, ret);
 }
 
 Value *ScalarExprEmitter::GetWidthMinusOneValue(Value* LHS,Value* RHS) {

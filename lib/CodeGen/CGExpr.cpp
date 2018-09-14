@@ -983,6 +983,29 @@ void CodeGenModule::EmitExplicitCastExprType(const ExplicitCastExpr *E,
     DI->EmitExplicitCastType(E->getType());
 }
 
+
+static llvm::Value* OneLevelWrappedPointerToRawPointer(CodeGenFunction &CGF,
+                                      llvm::Value* OneLevelPointerVal){
+  if (OneLevelPointerVal->getType()->isPointerTy() &&
+    !(cast<llvm::PointerType>(OneLevelPointerVal->getType())->getElementType()->isPointerTy())
+  ) {
+    auto zero = CGF.Builder.getInt32(0);
+    SmallVector<llvm::Value*, 2> indexes { zero, zero };
+    return CGF.Builder.CreateGEP(OneLevelPointerVal, indexes);
+  } else {
+    return OneLevelPointerVal;
+  }
+}
+
+static llvm::Value* WrappedPointerRegToRawPointerReg(CodeGenFunction &CGF,
+                                      llvm::Value* PointerVal){
+  if (!PointerVal->getType()->isPointerTy()) {
+    return CGF.Builder.CreateExtractValue(PointerVal, 0);
+  } else {
+    return PointerVal;
+  }
+}
+
 //===----------------------------------------------------------------------===//
 //                         LValue Expression Emission
 //===----------------------------------------------------------------------===//
@@ -1045,10 +1068,17 @@ Address CodeGenFunction::EmitPointerWithAlignment(const Expr *E,
                                       CodeGenFunction::CFITCK_UnrelatedCast,
                                       CE->getLocStart());
         }
+
+
+        llvm::Type* rawTargetType = ConvertType(E->getType());
+        if(E->getType()->isPointerType()) {
+          rawTargetType = cast<llvm::StructType>(rawTargetType)->getElementType(0);
+        }
+
         return CE->getCastKind() != CK_AddressSpaceConversion
-                   ? Builder.CreateBitCast(Addr, ConvertType(E->getType()))
-                   : Builder.CreateAddrSpaceCast(Addr,
-                                                 ConvertType(E->getType()));
+                  ? Builder.CreateBitCast(Addr, rawTargetType)
+                  : Builder.CreateAddrSpaceCast(Addr,
+                                                rawTargetType);
       }
       break;
 
@@ -1094,7 +1124,8 @@ Address CodeGenFunction::EmitPointerWithAlignment(const Expr *E,
   // Otherwise, use the alignment of the type.
   CharUnits Align = getNaturalPointeeTypeAlignment(E->getType(), BaseInfo,
                                                    TBAAInfo);
-  return Address(EmitScalarExpr(E), Align);
+  auto ret = WrappedPointerRegToRawPointerReg(*this, EmitScalarExpr(E));
+  return Address(ret, Align);
 }
 
 RValue CodeGenFunction::GetUndefRValue(QualType Ty) {
@@ -1648,28 +1679,6 @@ llvm::Value *CodeGenFunction::EmitFromMemory(llvm::Value *Value, QualType Ty) {
   }
 
   return Value;
-}
-
-static llvm::Value* OneLevelWrappedPointerToRawPointer(CodeGenFunction &CGF,
-                                      llvm::Value* OneLevelPointerVal){
-  if (OneLevelPointerVal->getType()->isPointerTy() &&
-    !(cast<llvm::PointerType>(OneLevelPointerVal->getType())->getElementType()->isPointerTy())
-  ) {
-    auto zero = CGF.Builder.getInt32(0);
-    SmallVector<llvm::Value*, 2> indexes { zero, zero };
-    return CGF.Builder.CreateGEP(OneLevelPointerVal, indexes);
-  } else {
-    return OneLevelPointerVal;
-  }
-}
-
-static llvm::Value* WrappedPointerRegToRawPointerReg(CodeGenFunction &CGF,
-                                      llvm::Value* PointerVal){
-  if (!PointerVal->getType()->isPointerTy()) {
-    return CGF.Builder.CreateExtractValue(PointerVal, 0);
-  } else {
-    return PointerVal;
-  }
 }
 
 void CodeGenFunction::EmitStoreOfScalar(llvm::Value *Value, Address Addr,
