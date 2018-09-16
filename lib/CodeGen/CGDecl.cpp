@@ -226,6 +226,9 @@ llvm::Constant *CodeGenModule::getOrCreateStaticVarDecl(
     Name = getStaticDeclName(*this, D);
 
   llvm::Type *LTy = getTypes().ConvertTypeForMem(Ty);
+  if (Ty->isPointerType() && !LTy->isPointerTy()) {
+    LTy = cast<llvm::StructType>(LTy)->getElementType(0);
+  }
   LangAS AS = GetGlobalVarAddressSpace(&D);
   unsigned TargetAS = getContext().getTargetAddressSpace(AS);
 

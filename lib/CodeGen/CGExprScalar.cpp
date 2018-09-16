@@ -598,10 +598,13 @@ public:
 
 
   Value *VisitUnaryAddrOf(const UnaryOperator *E) {
-    if (isa<MemberPointerType>(E->getType())) // never sugared
-      return CGF.CGM.getMemberPointerConstant(E);
-
-    return EmitLValue(E->getSubExpr()).getPointer();
+    Value* ret;
+    if (isa<MemberPointerType>(E->getType())) { // never sugared
+      ret = CGF.CGM.getMemberPointerConstant(E);
+    } else {
+      ret = EmitLValue(E->getSubExpr()).getPointer();
+    }
+    return RawPointerToWrappedPointer(CGF, ret);
   }
   Value *VisitUnaryDeref(const UnaryOperator *E) {
     if (E->getType()->isVoidType())
@@ -824,6 +827,10 @@ Value *ScalarExprEmitter::EmitConversionToBool(Value *Src, QualType SrcType) {
 
   if (const MemberPointerType *MPT = dyn_cast<MemberPointerType>(SrcType))
     return CGF.CGM.getCXXABI().EmitMemberPointerIsNotNull(CGF, Src, MPT);
+
+  if (SrcType->isPointerType()){
+    Src = WrappedPointerRegToRawPointerReg(CGF, Src);
+  }
 
   assert((SrcType->isIntegerType() || isa<llvm::PointerType>(Src->getType())) &&
          "Unknown scalar type to convert");
