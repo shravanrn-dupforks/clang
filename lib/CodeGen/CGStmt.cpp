@@ -31,6 +31,15 @@
 using namespace clang;
 using namespace CodeGen;
 
+static llvm::Value* WrappedPointerRegToRawPointerReg(CodeGenFunction &CGF,
+                                      llvm::Value* PointerVal){
+  if (!PointerVal->getType()->isPointerTy()) {
+    return CGF.Builder.CreateExtractValue(PointerVal, 0);
+  } else {
+    return PointerVal;
+  }
+}
+
 //===----------------------------------------------------------------------===//
 //                              Statement Emission
 //===----------------------------------------------------------------------===//
@@ -1078,7 +1087,13 @@ void CodeGenFunction::EmitReturnStmt(const ReturnStmt &S) {
   } else {
     switch (getEvaluationKind(RV->getType())) {
     case TEK_Scalar:
-      Builder.CreateStore(EmitScalarExpr(RV), ReturnValue);
+      {
+        auto retVal = EmitScalarExpr(RV);
+        if (RV->getType()->isPointerType()) {
+          retVal = WrappedPointerRegToRawPointerReg(*this, retVal);
+        }
+        Builder.CreateStore(retVal, ReturnValue);
+      }
       break;
     case TEK_Complex:
       EmitComplexExprIntoLValue(RV, MakeAddrLValue(ReturnValue, RV->getType()),

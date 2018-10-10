@@ -899,6 +899,22 @@ struct NoExpansion : TypeExpansion {
 };
 }  // namespace
 
+static llvm::Value* WrappedPointerRegToRawPointerReg(CodeGenFunction &CGF,
+                                      llvm::Value* PointerVal){
+  if (!PointerVal->getType()->isPointerTy()) {
+    return CGF.Builder.CreateExtractValue(PointerVal, 0);
+  } else {
+    return PointerVal;
+  }
+}
+
+static llvm::Type* WrappedPointerTypeToRawPointerType(QualType cType, llvm::Type* lType) {
+  if (cType->isPointerType() && lType->isStructTy()) {
+    return cast<llvm::StructType>(lType)->getElementType(0);
+  }
+  return lType;
+}
+
 static std::unique_ptr<TypeExpansion>
 getTypeExpansion(QualType Ty, const ASTContext &Context) {
   if (const ConstantArrayType *AT = Context.getAsConstantArrayType(Ty)) {
@@ -1452,7 +1468,8 @@ void ClangToLLVMArgMapping::construct(const ASTContext &Context,
     case ABIArgInfo::Extend:
     case ABIArgInfo::Direct: {
       // FIXME: handle sseregparm someday...
-      llvm::StructType *STy = dyn_cast<llvm::StructType>(AI.getCoerceToType());
+      llvm::Type *ATy = WrappedPointerTypeToRawPointerType(ArgType, AI.getCoerceToType());
+      llvm::StructType *STy = dyn_cast<llvm::StructType>(ATy);
       if (AI.isDirect() && AI.getCanBeFlattened() && STy) {
         IRArgs.NumberOfArgs = STy->getNumElements();
       } else {
@@ -1633,7 +1650,7 @@ CodeGenTypes::GetFunctionType(const CGFunctionInfo &FI) {
     case ABIArgInfo::Direct: {
       // Fast-isel and the optimizer generally like scalar values better than
       // FCAs, so we flatten them if this is safe to do for this argument.
-      llvm::Type *argType = ArgInfo.getCoerceToType();
+      llvm::Type *argType = WrappedPointerTypeToRawPointerType(it->type, ArgInfo.getCoerceToType());
       llvm::StructType *st = dyn_cast<llvm::StructType>(argType);
       if (st && ArgInfo.isDirect() && ArgInfo.getCanBeFlattened()) {
         assert(NumIRArgs == st->getNumElements());
@@ -1666,6 +1683,7 @@ CodeGenTypes::GetFunctionType(const CGFunctionInfo &FI) {
   bool Erased = FunctionsBeingProcessed.erase(&FI); (void)Erased;
   assert(Erased && "Not in set?");
 
+  resultType = WrappedPointerTypeToRawPointerType(FI.getReturnType(), resultType);
   return llvm::FunctionType::get(resultType, ArgTypes, FI.isVariadic());
 }
 
@@ -3768,15 +3786,6 @@ CodeGenFunction::EmitCallOrInvoke(llvm::Value *Callee,
 void CodeGenFunction::deferPlaceholderReplacement(llvm::Instruction *Old,
                                                   llvm::Value *New) {
   DeferredReplacements.push_back(std::make_pair(Old, New));
-}
-
-static llvm::Value* WrappedPointerRegToRawPointerReg(CodeGenFunction &CGF,
-                                      llvm::Value* PointerVal){
-  if (!PointerVal->getType()->isPointerTy()) {
-    return CGF.Builder.CreateExtractValue(PointerVal, 0);
-  } else {
-    return PointerVal;
-  }
 }
 
 RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
