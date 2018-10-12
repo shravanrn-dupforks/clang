@@ -1857,6 +1857,17 @@ void ItaniumRecordLayoutBuilder::LayoutField(const FieldDecl *D,
     FieldSize += ExtraSizeForAsan;
   }
 
+  if (true /* Should pad pointers */) {
+    auto ft = D->getType();
+    std::pair<CharUnits, CharUnits> FieldInfo = 
+      Context.getTypeInfoInChars(ft);
+    if (ft->isPointerType() && !ft->isArrayType()) {
+      FieldSize += FieldInfo.first;
+    } else if (ft->isArrayType() && Context.getAsArrayType(ft)->getElementType()->isPointerType()) {
+      FieldSize += FieldInfo.first;
+    }
+  }
+
   // Reserve space for this field.
   uint64_t FieldSizeInBits = Context.toBits(FieldSize);
   if (IsUnion)

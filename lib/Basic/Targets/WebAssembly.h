@@ -138,7 +138,6 @@ public:
       // with WASM32's machine model
 
       // Properties from host target that we can safely copy
-      PointerWidth = HostTarget->getPointerWidth(/* AddrSpace = */ 0);
       PointerAlign = HostTarget->getPointerAlign(/* AddrSpace = */ 0);
       BoolWidth = HostTarget->getBoolWidth();
       BoolAlign = HostTarget->getBoolAlign();
@@ -157,10 +156,7 @@ public:
       MinGlobalAlign = HostTarget->getMinGlobalAlign();
       DefaultAlignForAttributeAligned = 
         HostTarget->getDefaultAlignForAttributeAligned();
-      SizeType = HostTarget->getSizeType();
       IntMaxType = HostTarget->getIntMaxType();
-      PtrDiffType = HostTarget->getPtrDiffType(/* AddrSpace = */ 0);
-      IntPtrType = HostTarget->getIntPtrType();
       WCharType = HostTarget->getWCharType();
       WIntType = HostTarget->getWIntType();
       Char16Type = HostTarget->getChar16Type();
@@ -178,6 +174,23 @@ public:
         HostTarget->getZeroLengthBitfieldBoundary();
       LargeArrayMinWidth = HostTarget->getLargeArrayMinWidth();
       LargeArrayAlign = HostTarget->getLargeArrayAlign();
+
+
+      //PointerWidth = HostTarget->getPointerWidth(/* AddrSpace = */ 0);
+      //SizeType = HostTarget->getSizeType();
+      //PtrDiffType = HostTarget->getPtrDiffType(/* AddrSpace = */ 0);
+      //IntPtrType = HostTarget->getIntPtrType();
+      if (LongWidth == 32) {
+        SizeType = UnsignedLong;
+        PtrDiffType = SignedLong;
+        IntPtrType = SignedLong;
+      } else if (IntWidth == 32) {
+        SizeType = UnsignedInt;
+        PtrDiffType = SignedInt;
+        IntPtrType = SignedInt;
+      } else {
+        abort();
+      }
 
       // We need to make sure wasm32 supports these properties before copying
       // from the host
