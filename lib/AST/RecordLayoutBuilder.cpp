@@ -1857,14 +1857,17 @@ void ItaniumRecordLayoutBuilder::LayoutField(const FieldDecl *D,
     FieldSize += ExtraSizeForAsan;
   }
 
-  if (true /* Should pad pointers */) {
-    auto ft = D->getType();
-    std::pair<CharUnits, CharUnits> FieldInfo = 
-      Context.getTypeInfoInChars(ft);
-    if (ft->isPointerType() && !ft->isArrayType()) {
-      FieldSize += FieldInfo.first;
-    } else if (ft->isArrayType() && Context.getAsArrayType(ft)->getElementType()->isPointerType()) {
-      FieldSize += FieldInfo.first;
+  unsigned TrailingPointerPadding = Context.getTargetInfo().trailingPointerPadding();
+  if (TrailingPointerPadding != 0) {
+    clang::QualType FT = D->getType();
+    const ConstantArrayType *AT = Context.getAsConstantArrayType(FT);
+    if (FT->isPointerType() && !AT) {
+      FieldSize +=  Context.toCharUnitsFromBits(TrailingPointerPadding);
+    } else if (FT->isArrayType() && !AT) {
+      FieldSize +=  Context.toCharUnitsFromBits(TrailingPointerPadding);
+    } else if (FT->isArrayType() && AT->getElementType()->isPointerType()) {
+      auto ArrSize = AT->getSize().getLimitedValue(INT64_MAX);
+      FieldSize +=  Context.toCharUnitsFromBits(ArrSize * TrailingPointerPadding);
     }
   }
 

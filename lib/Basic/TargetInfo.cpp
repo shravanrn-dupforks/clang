@@ -127,6 +127,9 @@ TargetInfo::TargetInfo(const llvm::Triple &T) : TargetOpts(), Triple(T) {
   AddrSpaceMap = &DefaultAddrSpaceMap;
   UseAddrSpaceMapMangling = false;
 
+  // Default to no trailing padding
+  TrailingPointerPadding = 0;
+
   // Default to an unknown platform name.
   PlatformName = "unknown";
   PlatformMinVersion = VersionTuple();

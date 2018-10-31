@@ -254,6 +254,9 @@ protected:
   /// not for language specific address spaces
   bool UseAddrSpaceMapMangling;
 
+  /// Specify if pointers in structs should have a trailing padding
+  unsigned TrailingPointerPadding;
+
 public:
   IntType getSizeType() const { return SizeType; }
   IntType getSignedSizeType() const {
@@ -724,6 +727,11 @@ public:
   /// not for language specific address spaces
   bool useAddressSpaceMapMangling() const {
     return UseAddrSpaceMapMangling;
+  }
+
+  /// Specify if pointers in structs should have a trailing padding
+  unsigned trailingPointerPadding() const {
+    return TrailingPointerPadding;
   }
 
   ///===---- Other target property query methods --------------------------===//

@@ -175,11 +175,6 @@ public:
       LargeArrayMinWidth = HostTarget->getLargeArrayMinWidth();
       LargeArrayAlign = HostTarget->getLargeArrayAlign();
 
-
-      //PointerWidth = HostTarget->getPointerWidth(/* AddrSpace = */ 0);
-      //SizeType = HostTarget->getSizeType();
-      //PtrDiffType = HostTarget->getPtrDiffType(/* AddrSpace = */ 0);
-      //IntPtrType = HostTarget->getIntPtrType();
       if (LongWidth == 32) {
         SizeType = UnsignedLong;
         PtrDiffType = SignedLong;
@@ -188,8 +183,10 @@ public:
         SizeType = UnsignedInt;
         PtrDiffType = SignedInt;
         IntPtrType = SignedInt;
-      } else {
-        abort();
+      }
+
+      if (PointerWidth <= HostTarget->getPointerWidth(/* AddrSpace = */ 0)) {
+        TrailingPointerPadding = HostTarget->getPointerWidth(/* AddrSpace = */ 0) - PointerWidth;
       }
 
       // We need to make sure wasm32 supports these properties before copying
@@ -226,6 +223,19 @@ public:
         << HostTarget->getTriple().str() << "Endian";
       return false;
     }
+    if (LongWidth != 32 && IntWidth != 32) {
+      Diags.Report(diag::err_wasm_host_triple_missing_integer_width) 
+        << HostTarget->getTriple().str() << "32";
+      return false;
+    }
+    if (PointerWidth > HostTarget->getPointerWidth(/* AddrSpace = */ 0)) {
+      Diags.Report(diag::err_wasm_host_triple_has_small_pointer) 
+        << HostTarget->getTriple().str()
+        << std::to_string(HostTarget->getPointerWidth(/* AddrSpace = */ 0)) 
+        << std::to_string(PointerWidth);
+      return false;
+    }
+
     return true;
   }
 

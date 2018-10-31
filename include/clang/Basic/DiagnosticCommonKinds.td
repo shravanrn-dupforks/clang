@@ -252,4 +252,8 @@ def err_omp_more_one_clause : Error<
 // Wasm
 def err_wasm_host_triple_unsupported_value : Error<
   "Host target triple('%0') parameter '%1' is not supported in WASM">;
+def err_wasm_host_triple_missing_integer_width : Error<
+  "Host target triple('%0') parameter for WASM does not have a type with width '%1'">;
+def err_wasm_host_triple_has_small_pointer : Error<
+  "Host target triple('%0') parameter for WASM has a smaller pointer width ('%1') than allowed ('%2')">;
 }
