@@ -2186,6 +2186,8 @@ public:
   const ASTRecordLayout &
   getASTObjCImplementationLayout(const ObjCImplementationDecl *D) const;
 
+  void outputTypeToFile(const RecordDecl *D, raw_ostream &OS) const;
+
   /// Get our current best idea for the key function of the
   /// given record decl, or nullptr if there isn't one.
   ///
